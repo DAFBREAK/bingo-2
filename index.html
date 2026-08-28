@@ -6,7 +6,7 @@
   <title>BINGO MALVINAS - 100 Bolas</title>
   <!-- html2canvas para exportar cartones -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <!-- PeerJS para Sincronización de Datos y Audio en Vivo P2P (Puerto 443 SSL) -->
+  <!-- PeerJS para Sincronización Inmediata y Transmisión de Audio PC (Puerto 443 HTTPS nativo) -->
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <!-- QRCode.js para compartir enlace -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -91,7 +91,7 @@
       border-radius: 50%;
       background: #ef4444;
       display: inline-block;
-      transition: background 0.3s;
+      transition: all 0.3s ease;
     }
     .status-dot.online {
       background: #22c55e;
@@ -752,7 +752,7 @@
       roomId = 'bingo' + Math.floor(1000 + Math.random() * 9000);
     }
 
-    const hostPeerId = `bmhost_${roomId}`;
+    const hostPeerId = `bmalvinas_${roomId}`;
 
     // Armar tablero 1 a 100
     for (let i = 1; i <= 100; i++) {
@@ -1101,7 +1101,7 @@
     });
 
     // ==========================================
-    // SISTEMA WEBRTC P2P (SINCRONIZACIÓN Y AUDIO)
+    // SISTEMA WEBRTC P2P CONEXIÓN DIRECTA
     // ==========================================
     const streamBtn = document.getElementById('streamBtn');
     const streamModal = document.getElementById('streamModal');
@@ -1126,13 +1126,20 @@
       if (isViewer) return;
       const payload = getStatePayload();
       connectedClients.forEach(conn => {
-        if (conn.open) conn.send(payload);
+        if (conn && conn.open) conn.send(payload);
       });
     }
 
     if (!isViewer) {
       // MODO ANFITRIÓN
-      peer = new Peer(hostPeerId, { debug: 1 });
+      peer = new Peer(hostPeerId, {
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+          ]
+        }
+      });
 
       peer.on('open', (id) => {
         statusDot.classList.add('online');
@@ -1177,7 +1184,7 @@
             const audioTracks = displayStream.getAudioTracks();
             if (audioTracks.length === 0) {
               displayStream.getTracks().forEach(t => t.stop());
-              return alert('⚠️ Asegúrate de marcar "Compartir audio del sistema / pestaña" al seleccionar la pantalla.');
+              return alert('⚠️ Marca la casilla "Compartir audio del sistema / pestaña" al seleccionar la pantalla.');
             }
 
             audioStream = new MediaStream(audioTracks);
@@ -1230,9 +1237,17 @@
       // MODO ESPECTADOR
       document.getElementById('hostControls').style.display = 'none';
       viewerAudioBar.style.display = 'flex';
-      statusText.textContent = 'Conectando con Anfitrión...';
+      statusText.textContent = 'Buscando Anfitrión...';
 
-      peer = new Peer();
+      peer = new Peer({
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+          ]
+        }
+      });
+
       let hostConn = null;
 
       peer.on('open', () => {
@@ -1254,16 +1269,14 @@
         hostConn.on('close', () => {
           statusDot.classList.remove('online');
           statusText.textContent = 'Reconectando con Anfitrión...';
-          setTimeout(connectToHost, 3000);
+          setTimeout(connectToHost, 2000);
         });
       }
 
       peer.on('error', (err) => {
-        if (err.type === 'peer-unavailable') {
-          statusDot.classList.remove('online');
-          statusText.textContent = 'Esperando a que el Anfitrión abra el tablero...';
-          setTimeout(connectToHost, 4000);
-        }
+        statusDot.classList.remove('online');
+        statusText.textContent = 'Esperando a que el Anfitrión abra el juego...';
+        setTimeout(connectToHost, 3000);
       });
 
       // Audio en Vivo
