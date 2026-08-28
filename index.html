@@ -4,10 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>BINGO MALVINAS - 100 Bolas</title>
+  <!-- html2canvas para exportar cartones -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+  <!-- PeerJS para Sincronización de Datos y Audio en Vivo P2P (Puerto 443 SSL) -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <!-- QRCode.js para compartir enlace -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     * {
       box-sizing: border-box;
@@ -89,6 +91,7 @@
       border-radius: 50%;
       background: #ef4444;
       display: inline-block;
+      transition: background 0.3s;
     }
     .status-dot.online {
       background: #22c55e;
@@ -534,9 +537,10 @@
   <header>
     <div class="sub-title" id="hostTitle">
       <span class="status-dot" id="statusDot"></span>
-      <span id="statusText">Conectando...</span>
+      <span id="statusText">Iniciando...</span>
     </div>
 
+    <!-- Barra de audio para Espectadores -->
     <div id="viewerAudioBar" class="audio-player-box" style="display: none;">
       <span>🔊 Música En Vivo:</span>
       <button id="unmuteAudioBtn" class="btn-success" style="padding: 3px 8px; font-size: 0.75rem;">Escuchar</button>
@@ -552,6 +556,7 @@
       <button id="openJackpotBtn" class="btn-amber">💰 Pozo</button>
       <button id="camBtn">Cámara</button>
       
+      <!-- Audio PC -->
       <button id="audioStreamBtn" class="btn-teal">🎵 Audio PC</button>
 
       <input type="file" id="bannerInput" accept="image/*" style="display: none;">
@@ -585,6 +590,7 @@
 
   <audio id="remoteAudio" autoplay playsinline></audio>
 
+  <!-- Notificación de Ganadores -->
   <div class="winner-banner" id="winnerBanner">
     <h1>🎉 ¡¡TENEMOS GANADORES!! 🎉</h1>
     <div class="winner-podium" id="winnerPodium">
@@ -595,6 +601,7 @@
     <button onclick="document.getElementById('winnerBanner').style.display='none'" class="btn-danger" style="font-size: 0.95rem; padding: 6px 15px;">Cerrar Alerta</button>
   </div>
 
+  <!-- Modal Pozo -->
   <div class="modal-overlay" id="jackpotModal">
     <div class="jackpot-modal-box">
       <h2 style="color: #facc15; text-align: center; font-size: 1.2rem;">Configurar Pozo de Premios</h2>
@@ -632,6 +639,7 @@
     </div>
   </div>
 
+  <!-- Modal Transmisión QR -->
   <div class="modal-overlay" id="streamModal">
     <div style="background: #1e293b; padding: 20px; border-radius: 12px; border: 2px solid #38bdf8; max-width: 450px; width: 90%; text-align: center; display: flex; flex-direction: column; gap: 12px; align-items: center;">
       <h2 style="color: #38bdf8; font-size: 1.2rem;">📡 Transmisión en Vivo</h2>
@@ -645,6 +653,7 @@
     </div>
   </div>
 
+  <!-- Modal Cartones -->
   <div class="modal-overlay" id="cardsModal">
     <div class="modal-box">
       <div class="modal-header">
@@ -740,15 +749,12 @@
     const isViewer = Boolean(roomId);
 
     if (!roomId) {
-      roomId = 'bingo_' + Math.random().toString(36).substring(2, 9);
+      roomId = 'bingo' + Math.floor(1000 + Math.random() * 9000);
     }
 
-    const mqttTopic = `bingo_malvinas_stream/${roomId}`;
-    const hostPeerId = `bm_host_${roomId.replace(/[^a-zA-Z0-9]/g, '')}`;
+    const hostPeerId = `bmhost_${roomId}`;
 
-    // ==========================================
-    // INICIALIZACIÓN DE TABLERO 1 A 100
-    // ==========================================
+    // Armar tablero 1 a 100
     for (let i = 1; i <= 100; i++) {
       const slot = document.createElement('div');
       slot.className = 'ball-slot';
@@ -855,9 +861,6 @@
       }
     });
 
-    // ==========================================
-    // GESTIÓN DE POZO
-    // ==========================================
     openJackpotBtn.addEventListener('click', () => jackpotModal.style.display = 'flex');
 
     calcJackpotBtn.addEventListener('click', () => {
@@ -889,9 +892,6 @@
       display3rd.textContent = `$${jackpotData.p3.toLocaleString()}`;
     }
 
-    // ==========================================
-    // CÁMARA
-    // ==========================================
     camBtn.addEventListener('click', async () => {
       if (stream) {
         stopCamera();
@@ -920,9 +920,7 @@
       }
     }
 
-    // ==========================================
-    // BANNER CON COMPRESIÓN ANTI-CAÍDAS
-    // ==========================================
+    // BANNER PERMANENTE Y COMPRIMIDO
     uploadBannerBtn.addEventListener('click', () => bannerInput.click());
 
     bannerInput.addEventListener('change', (e) => {
@@ -933,8 +931,7 @@
         reader.onload = function(event) {
           const img = new Image();
           img.onload = function() {
-            // Optimizar dimensiones y comprimir a JPEG liviano
-            const maxDim = 800;
+            const maxDim = 600;
             let width = img.width;
             let height = img.height;
             if (width > height && width > maxDim) {
@@ -951,8 +948,7 @@
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0, width, height);
 
-            const compressedBase64 = canvas.toDataURL('image/jpeg', 0.75);
-            persistentBannerSrc = compressedBase64;
+            persistentBannerSrc = canvas.toDataURL('image/jpeg', 0.65);
             bannerImg.src = persistentBannerSrc;
             bannerImg.style.display = 'block';
             camPlaceholder.style.display = 'none';
@@ -984,9 +980,7 @@
       else document.exitFullscreen();
     });
 
-    // ==========================================
-    // GENERADOR DE CARTONES
-    // ==========================================
+    // CARTONES
     const cardsModal = document.getElementById('cardsModal');
     const openCardsBtn = document.getElementById('openCardsBtn');
     const closeModalBtn = document.getElementById('closeModalBtn');
@@ -1107,48 +1101,90 @@
     });
 
     // ==========================================
-    // TRANSMISIÓN DE AUDIO EN VIVO (WebRTC / PeerJS)
+    // SISTEMA WEBRTC P2P (SINCRONIZACIÓN Y AUDIO)
     // ==========================================
+    const streamBtn = document.getElementById('streamBtn');
+    const streamModal = document.getElementById('streamModal');
+    const streamLinkInput = document.getElementById('streamLinkInput');
+    const copyStreamLinkBtn = document.getElementById('copyStreamLinkBtn');
+
     let peer = null;
-    const activeCalls = [];
+    const connectedClients = [];
+
+    function getStatePayload() {
+      return {
+        drawn: Array.from(drawnNumbers),
+        current: currentBallElem.textContent,
+        bannerSrc: persistentBannerSrc,
+        jackpot: jackpotData,
+        winners: winnersList,
+        showBanner: winnerBanner.style.display === 'block'
+      };
+    }
+
+    function broadcastState() {
+      if (isViewer) return;
+      const payload = getStatePayload();
+      connectedClients.forEach(conn => {
+        if (conn.open) conn.send(payload);
+      });
+    }
 
     if (!isViewer) {
-      peer = new Peer(hostPeerId);
+      // MODO ANFITRIÓN
+      peer = new Peer(hostPeerId, { debug: 1 });
+
+      peer.on('open', (id) => {
+        statusDot.classList.add('online');
+        statusText.textContent = `Tablero Listo (Sala: ${roomId})`;
+      });
+
+      peer.on('connection', (conn) => {
+        connectedClients.push(conn);
+        conn.on('open', () => {
+          conn.send(getStatePayload());
+        });
+        conn.on('close', () => {
+          const idx = connectedClients.indexOf(conn);
+          if (idx !== -1) connectedClients.splice(idx, 1);
+        });
+      });
+
       peer.on('call', (call) => {
         if (audioStream) {
           call.answer(audioStream);
-          activeCalls.push(call);
         }
       });
 
+      peer.on('error', (err) => {
+        if (err.type === 'unavailable-id') {
+          statusDot.classList.add('online');
+          statusText.textContent = 'Tablero Listo';
+        }
+      });
+
+      // Transmitir Audio PC
       audioStreamBtn.addEventListener('click', async () => {
         if (audioStream) {
           stopAudioStream();
         } else {
           try {
-            // Permite capturar el audio del sistema / pestaña donde suena la música
             const displayStream = await navigator.mediaDevices.getDisplayMedia({
               video: true,
-              audio: {
-                echoCancellation: false,
-                noiseSuppression: false,
-                autoGainControl: false
-              }
+              audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
             });
 
             const audioTracks = displayStream.getAudioTracks();
             if (audioTracks.length === 0) {
               displayStream.getTracks().forEach(t => t.stop());
-              return alert('⚠️ Asegúrate de marcar la casilla "Compartir audio del sistema" o "Compartir audio de pestaña" al seleccionar la pantalla.');
+              return alert('⚠️ Asegúrate de marcar "Compartir audio del sistema / pestaña" al seleccionar la pantalla.');
             }
 
-            // Ocultamos la pista de video ya que solo necesitamos el audio
             audioStream = new MediaStream(audioTracks);
             audioStreamBtn.textContent = '⏹️ Parar Audio';
             audioStreamBtn.classList.replace('btn-teal', 'btn-danger');
 
             displayStream.getVideoTracks().forEach(t => t.stop());
-
             audioTracks[0].onended = () => stopAudioStream();
           } catch (err) {
             console.error('Error al capturar audio:', err);
@@ -1164,92 +1200,15 @@
         audioStreamBtn.textContent = '🎵 Audio PC';
         audioStreamBtn.classList.replace('btn-danger', 'btn-teal');
       }
-    } else {
-      // MODO ESPECTADOR: Conexión de audio al Host
-      viewerAudioBar.style.display = 'flex';
-      peer = new Peer();
 
-      peer.on('open', () => {
-        connectToHostAudio();
-      });
-
-      function connectToHostAudio() {
-        // Enviar stream mudo para recibir el audio del host
-        const dummyStream = new AudioContext().createMediaStreamDestination().stream;
-        const call = peer.call(hostPeerId, dummyStream);
-        if (call) {
-          call.on('stream', (stream) => {
-            remoteAudio.srcObject = stream;
-            remoteAudio.play().catch(() => {});
-          });
-        }
+      // Enlace de Compartir
+      let shareUrl = window.location.href;
+      if (window.location.protocol === 'file:') {
+        shareUrl = `http://localhost/bingo.html?game=${roomId}`;
+      } else {
+        shareUrl = `${window.location.origin}${window.location.pathname}?game=${roomId}`;
       }
 
-      unmuteAudioBtn.addEventListener('click', () => {
-        remoteAudio.play().then(() => {
-          unmuteAudioBtn.textContent = '🟢 Escuchando';
-          unmuteAudioBtn.classList.replace('btn-success', 'btn-purple');
-        }).catch(() => connectToHostAudio());
-      });
-
-      volumeControl.addEventListener('input', (e) => {
-        remoteAudio.volume = e.target.value;
-      });
-    }
-
-    // ==========================================
-    // TRANSMISIÓN EMQX MQTT (Puerto 8084 WSS)
-    // ==========================================
-    const streamBtn = document.getElementById('streamBtn');
-    const streamModal = document.getElementById('streamModal');
-    const streamLinkInput = document.getElementById('streamLinkInput');
-    const copyStreamLinkBtn = document.getElementById('copyStreamLinkBtn');
-
-    const clientUniqueId = 'client_' + Math.random().toString(36).substring(2, 10);
-    const mqttClient = new Paho.MQTT.Client('broker.emqx.io', 8084, '/mqtt', clientUniqueId);
-
-    mqttClient.onConnectionLost = (responseObject) => {
-      statusDot.classList.remove('online');
-      statusText.textContent = 'Reconectando...';
-      if (responseObject.errorCode !== 0) {
-        setTimeout(connectMqtt, 2000);
-      }
-    };
-
-    mqttClient.onMessageArrived = (message) => {
-      try {
-        const data = JSON.parse(message.payloadString);
-        applyRemoteState(data);
-      } catch (err) {}
-    };
-
-    function connectMqtt() {
-      mqttClient.connect({
-        useSSL: true,
-        timeout: 5,
-        keepAliveInterval: 30,
-        cleanSession: true,
-        onSuccess: () => {
-          statusDot.classList.add('online');
-          statusText.textContent = isViewer ? 'En Vivo (Espectador)' : 'Tablero 1 a 100';
-          mqttClient.subscribe(mqttTopic);
-          
-          if (!isViewer) {
-            broadcastState();
-          }
-        },
-        onFailure: () => {
-          statusDot.classList.remove('online');
-          statusText.textContent = 'Error de conexión';
-          setTimeout(connectMqtt, 3000);
-        }
-      });
-    }
-
-    connectMqtt();
-
-    if (!isViewer) {
-      const shareUrl = `${window.location.origin}${window.location.pathname}?game=${roomId}`;
       streamLinkInput.value = shareUrl;
       document.getElementById('qrcode').innerHTML = '';
       new QRCode(document.getElementById('qrcode'), {
@@ -1258,9 +1217,7 @@
         height: 160
       });
 
-      streamBtn.addEventListener('click', () => {
-        streamModal.style.display = 'flex';
-      });
+      streamBtn.addEventListener('click', () => streamModal.style.display = 'flex');
 
       copyStreamLinkBtn.addEventListener('click', () => {
         streamLinkInput.select();
@@ -1268,28 +1225,73 @@
         copyStreamLinkBtn.textContent = '✅ ¡Copiado!';
         setTimeout(() => copyStreamLinkBtn.textContent = '📋 Copiar Enlace', 2000);
       });
-    } else {
-      document.getElementById('hostControls').style.display = 'none';
-      statusText.textContent = 'En Vivo (Espectador)';
-    }
 
-    function broadcastState() {
-      if (isViewer) return;
-      if (mqttClient && mqttClient.isConnected()) {
-        const payload = JSON.stringify({
-          drawn: Array.from(drawnNumbers),
-          current: currentBallElem.textContent,
-          bannerSrc: persistentBannerSrc,
-          jackpot: jackpotData,
-          winners: winnersList,
-          showBanner: winnerBanner.style.display === 'block'
+    } else {
+      // MODO ESPECTADOR
+      document.getElementById('hostControls').style.display = 'none';
+      viewerAudioBar.style.display = 'flex';
+      statusText.textContent = 'Conectando con Anfitrión...';
+
+      peer = new Peer();
+      let hostConn = null;
+
+      peer.on('open', () => {
+        connectToHost();
+      });
+
+      function connectToHost() {
+        hostConn = peer.connect(hostPeerId, { reliable: true });
+
+        hostConn.on('open', () => {
+          statusDot.classList.add('online');
+          statusText.textContent = 'En Vivo (Espectador)';
         });
 
-        const message = new Paho.MQTT.Message(payload);
-        message.destinationName = mqttTopic;
-        message.retained = true;
-        mqttClient.send(message);
+        hostConn.on('data', (data) => {
+          applyRemoteState(data);
+        });
+
+        hostConn.on('close', () => {
+          statusDot.classList.remove('online');
+          statusText.textContent = 'Reconectando con Anfitrión...';
+          setTimeout(connectToHost, 3000);
+        });
       }
+
+      peer.on('error', (err) => {
+        if (err.type === 'peer-unavailable') {
+          statusDot.classList.remove('online');
+          statusText.textContent = 'Esperando a que el Anfitrión abra el tablero...';
+          setTimeout(connectToHost, 4000);
+        }
+      });
+
+      // Audio en Vivo
+      function listenHostAudio() {
+        try {
+          const dummyCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const dummyStream = dummyCtx.createMediaStreamDestination().stream;
+          const call = peer.call(hostPeerId, dummyStream);
+          if (call) {
+            call.on('stream', (stream) => {
+              remoteAudio.srcObject = stream;
+              remoteAudio.play().catch(() => {});
+            });
+          }
+        } catch(e) {}
+      }
+
+      unmuteAudioBtn.addEventListener('click', () => {
+        listenHostAudio();
+        remoteAudio.play().then(() => {
+          unmuteAudioBtn.textContent = '🟢 Escuchando';
+          unmuteAudioBtn.classList.replace('btn-success', 'btn-purple');
+        }).catch(() => {});
+      });
+
+      volumeControl.addEventListener('input', (e) => {
+        remoteAudio.volume = e.target.value;
+      });
     }
 
     function applyRemoteState(data) {
