@@ -6,8 +6,6 @@
   <title>BINGO MALVINAS - 100 Bolas</title>
   <!-- html2canvas para exportar cartones -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <!-- PeerJS para Sincronización WebRTC P2P Directa (Puerto 443 HTTPS nativo) -->
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <!-- QRCode.js para compartir enlace -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
@@ -586,7 +584,6 @@
     </div>
   </main>
 
-  <!-- Audio de Fondo Casino en Bucle -->
   <audio id="casinoMusic" loop preload="auto" src="https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=jazzy-abstract-beat-11254.mp3"></audio>
 
   <!-- Notificación de Ganadores -->
@@ -746,12 +743,10 @@
     const isViewer = Boolean(roomId);
 
     if (!roomId) {
-      roomId = 'bingo' + Math.floor(1000 + Math.random() * 9000);
+      roomId = 'bingo_' + Math.random().toString(36).substring(2, 8);
     }
 
-    const hostPeerId = `bmalvinas_${roomId}`;
-
-    // Armar tablero 1 a 100
+    // Tablero 1 a 100
     for (let i = 1; i <= 100; i++) {
       const slot = document.createElement('div');
       slot.className = 'ball-slot';
@@ -928,7 +923,7 @@
         reader.onload = function(event) {
           const img = new Image();
           img.onload = function() {
-            const maxDim = 600;
+            const maxDim = 500;
             let width = img.width;
             let height = img.height;
             if (width > height && width > maxDim) {
@@ -945,7 +940,7 @@
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0, width, height);
 
-            persistentBannerSrc = canvas.toDataURL('image/jpeg', 0.65);
+            persistentBannerSrc = canvas.toDataURL('image/jpeg', 0.6);
             bannerImg.src = persistentBannerSrc;
             bannerImg.style.display = 'block';
             camPlaceholder.style.display = 'none';
@@ -1097,70 +1092,67 @@
       downloadImagesBtn.textContent = orig;
     });
 
-    // ==========================================
-    // SISTEMA WEBRTC P2P CONEXIÓN DIRECTA
-    // ==========================================
+    // ==========================================================
+    // SISTEMA DE SINCRONIZACIÓN EN TIEMPO REAL (WEBSOCKET PURO)
+    // ==========================================================
     const streamBtn = document.getElementById('streamBtn');
     const streamModal = document.getElementById('streamModal');
     const streamLinkInput = document.getElementById('streamLinkInput');
     const copyStreamLinkBtn = document.getElementById('copyStreamLinkBtn');
 
-    let peer = null;
-    const connectedClients = [];
+    // Endpoint universal WebSocket sobre puerto 443 HTTPS sin bloqueos
+    const wsUrl = `wss://free.blr2.piesocket.com/v3/${roomId}?api_key=VCXCEuvhGcBDP7XhiJJUDvR1e1D3eiVjgZ9VRiaV&notify_self=0`;
+    let socket = null;
 
-    function getStatePayload() {
-      return {
-        drawn: Array.from(drawnNumbers),
-        current: currentBallElem.textContent,
-        bannerSrc: persistentBannerSrc,
-        jackpot: jackpotData,
-        winners: winnersList,
-        showBanner: winnerBanner.style.display === 'block'
+    function initWebSocket() {
+      socket = new WebSocket(wsUrl);
+
+      socket.onopen = () => {
+        statusDot.classList.add('online');
+        statusText.textContent = isViewer ? 'En Vivo (Espectador)' : `Tablero Conectado (${roomId})`;
+        if (!isViewer) {
+          broadcastState();
+        }
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data.drawn) {
+            applyRemoteState(data);
+          }
+        } catch (e) {}
+      };
+
+      socket.onclose = () => {
+        statusDot.classList.remove('online');
+        statusText.textContent = 'Reconectando...';
+        setTimeout(initWebSocket, 2000);
+      };
+
+      socket.onerror = () => {
+        statusDot.classList.remove('online');
       };
     }
 
+    initWebSocket();
+
     function broadcastState() {
       if (isViewer) return;
-      const payload = getStatePayload();
-      connectedClients.forEach(conn => {
-        if (conn && conn.open) conn.send(payload);
-      });
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const payload = JSON.stringify({
+          drawn: Array.from(drawnNumbers),
+          current: currentBallElem.textContent,
+          bannerSrc: persistentBannerSrc,
+          jackpot: jackpotData,
+          winners: winnersList,
+          showBanner: winnerBanner.style.display === 'block'
+        });
+        socket.send(payload);
+      }
     }
 
     if (!isViewer) {
-      // MODO ANFITRIÓN
-      peer = new Peer(hostPeerId, {
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' }
-          ]
-        }
-      });
-
-      peer.on('open', (id) => {
-        statusDot.classList.add('online');
-        statusText.textContent = `Tablero Listo (Sala: ${roomId})`;
-      });
-
-      peer.on('connection', (conn) => {
-        connectedClients.push(conn);
-        conn.on('open', () => {
-          conn.send(getStatePayload());
-        });
-        conn.on('close', () => {
-          const idx = connectedClients.indexOf(conn);
-          if (idx !== -1) connectedClients.splice(idx, 1);
-        });
-      });
-
-      peer.on('error', (err) => {
-        if (err.type === 'unavailable-id') {
-          statusDot.classList.add('online');
-          statusText.textContent = 'Tablero Listo';
-        }
-      });
-
       let shareUrl = window.location.href;
       if (window.location.protocol === 'file:') {
         shareUrl = `http://localhost/bingo.html?game=${roomId}`;
@@ -1184,28 +1176,19 @@
         copyStreamLinkBtn.textContent = '✅ ¡Copiado!';
         setTimeout(() => copyStreamLinkBtn.textContent = '📋 Copiar Enlace', 2000);
       });
-
     } else {
-      // MODO ESPECTADOR / JUGADOR
       document.getElementById('hostControls').style.display = 'none';
       casinoAudioBar.style.display = 'flex';
-      statusText.textContent = 'Buscando Anfitrión...';
+      statusText.textContent = 'Conectando con el Tablero...';
 
       casinoMusic.volume = 0.4;
 
-      // Intentar auto-reproducir o activar mediante botón si el navegador bloquea autoplay
-      casinoMusic.play().then(() => {
-        toggleMusicBtn.textContent = '⏸ Pausar';
-        toggleMusicBtn.classList.replace('btn-success', 'btn-amber');
-      }).catch(() => {
-        toggleMusicBtn.textContent = '▶ Activar Música';
-      });
-
       toggleMusicBtn.addEventListener('click', () => {
         if (casinoMusic.paused) {
-          casinoMusic.play();
-          toggleMusicBtn.textContent = '⏸ Pausar';
-          toggleMusicBtn.classList.replace('btn-success', 'btn-amber');
+          casinoMusic.play().then(() => {
+            toggleMusicBtn.textContent = '⏸ Pausar';
+            toggleMusicBtn.classList.replace('btn-success', 'btn-amber');
+          }).catch(() => {});
         } else {
           casinoMusic.pause();
           toggleMusicBtn.textContent = '▶ Activar Música';
@@ -1215,46 +1198,6 @@
 
       casinoVolume.addEventListener('input', (e) => {
         casinoMusic.volume = e.target.value;
-      });
-
-      peer = new Peer({
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' }
-          ]
-        }
-      });
-
-      let hostConn = null;
-
-      peer.on('open', () => {
-        connectToHost();
-      });
-
-      function connectToHost() {
-        hostConn = peer.connect(hostPeerId, { reliable: true });
-
-        hostConn.on('open', () => {
-          statusDot.classList.add('online');
-          statusText.textContent = 'En Vivo (Espectador)';
-        });
-
-        hostConn.on('data', (data) => {
-          applyRemoteState(data);
-        });
-
-        hostConn.on('close', () => {
-          statusDot.classList.remove('online');
-          statusText.textContent = 'Reconectando con Anfitrión...';
-          setTimeout(connectToHost, 2000);
-        });
-      }
-
-      peer.on('error', (err) => {
-        statusDot.classList.remove('online');
-        statusText.textContent = 'Esperando a que el Anfitrión abra el juego...';
-        setTimeout(connectToHost, 3000);
       });
     }
 
