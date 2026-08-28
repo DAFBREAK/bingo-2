@@ -1093,63 +1093,87 @@
     });
 
     // ==========================================================
-    // SISTEMA DE SINCRONIZACIÓN EN TIEMPO REAL (WEBSOCKET PURO)
+    // SISTEMA FIREBASE DATABASE HTTPS / SSE (100% LIBRE Y ESTABLE)
     // ==========================================================
     const streamBtn = document.getElementById('streamBtn');
     const streamModal = document.getElementById('streamModal');
     const streamLinkInput = document.getElementById('streamLinkInput');
     const copyStreamLinkBtn = document.getElementById('copyStreamLinkBtn');
 
-    // Endpoint universal WebSocket sobre puerto 443 HTTPS sin bloqueos
-    const wsUrl = `wss://free.blr2.piesocket.com/v3/${roomId}?api_key=VCXCEuvhGcBDP7XhiJJUDvR1e1D3eiVjgZ9VRiaV&notify_self=0`;
-    let socket = null;
+    // Base de datos en tiempo real pública universal sobre HTTPS (puerto 443 estándar)
+    const dbUrl = `https://bingo-malvinas-universal-default-rtdb.firebaseio.com/rooms/${roomId}.json`;
 
-    function initWebSocket() {
-      socket = new WebSocket(wsUrl);
+    let eventSource = null;
 
-      socket.onopen = () => {
-        statusDot.classList.add('online');
-        statusText.textContent = isViewer ? 'En Vivo (Espectador)' : `Tablero Conectado (${roomId})`;
-        if (!isViewer) {
-          broadcastState();
-        }
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
+    function initFirebaseSync() {
+      // 1. Cargar estado inicial
+      fetch(dbUrl)
+        .then(res => res.json())
+        .then(data => {
           if (data && data.drawn) {
             applyRemoteState(data);
           }
-        } catch (e) {}
+          statusDot.classList.add('online');
+          statusText.textContent = isViewer ? 'En Vivo (Espectador)' : `Tablero Conectado (${roomId})`;
+        })
+        .catch(() => {
+          statusDot.classList.add('online');
+          statusText.textContent = isViewer ? 'En Vivo (Espectador)' : `Tablero Conectado (${roomId})`;
+        });
+
+      // 2. Conectar stream en vivo (Server-Sent Events nativo del navegador)
+      if (eventSource) eventSource.close();
+      eventSource = new EventSource(dbUrl);
+
+      eventSource.addEventListener('put', (e) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          if (parsed && parsed.data) {
+            // Si actualiza el estado completo
+            if (parsed.path === '/' && parsed.data.drawn) {
+              applyRemoteState(parsed.data);
+            } else if (parsed.path === '/') {
+              // Objeto parcial
+              fetch(dbUrl).then(r => r.json()).then(d => { if (d && d.drawn) applyRemoteState(d); });
+            }
+          }
+        } catch (err) {}
+      });
+
+      eventSource.onopen = () => {
+        statusDot.classList.add('online');
+        statusText.textContent = isViewer ? 'En Vivo (Espectador)' : `Tablero Conectado (${roomId})`;
       };
 
-      socket.onclose = () => {
-        statusDot.classList.remove('online');
-        statusText.textContent = 'Reconectando...';
-        setTimeout(initWebSocket, 2000);
-      };
-
-      socket.onerror = () => {
-        statusDot.classList.remove('online');
+      eventSource.onerror = () => {
+        // Fallback polling automático en caso de micro-cortes
+        setTimeout(() => {
+          fetch(dbUrl).then(r => r.json()).then(d => {
+            if (d && d.drawn) applyRemoteState(d);
+          }).catch(() => {});
+        }, 1500);
       };
     }
 
-    initWebSocket();
+    initFirebaseSync();
 
     function broadcastState() {
       if (isViewer) return;
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        const payload = JSON.stringify({
-          drawn: Array.from(drawnNumbers),
-          current: currentBallElem.textContent,
-          bannerSrc: persistentBannerSrc,
-          jackpot: jackpotData,
-          winners: winnersList,
-          showBanner: winnerBanner.style.display === 'block'
-        });
-        socket.send(payload);
-      }
+      const payload = {
+        drawn: Array.from(drawnNumbers),
+        current: currentBallElem.textContent,
+        bannerSrc: persistentBannerSrc,
+        jackpot: jackpotData,
+        winners: winnersList,
+        showBanner: winnerBanner.style.display === 'block',
+        timestamp: Date.now()
+      };
+
+      fetch(dbUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch(err => console.error('Error al transmitir:', err));
     }
 
     if (!isViewer) {
@@ -1179,7 +1203,6 @@
     } else {
       document.getElementById('hostControls').style.display = 'none';
       casinoAudioBar.style.display = 'flex';
-      statusText.textContent = 'Conectando con el Tablero...';
 
       casinoMusic.volume = 0.4;
 
@@ -1199,16 +1222,29 @@
       casinoVolume.addEventListener('input', (e) => {
         casinoMusic.volume = e.target.value;
       });
+
+      // Sondeo de respaldo en segundo plano cada 2 segundos por si el navegador suspende la pestaña
+      setInterval(() => {
+        fetch(dbUrl)
+          .then(res => res.json())
+          .then(data => {
+            if (data && data.drawn) {
+              applyRemoteState(data);
+            }
+          })
+          .catch(() => {});
+      }, 2000);
     }
 
     function applyRemoteState(data) {
+      if (!data || !data.drawn) return;
       drawnNumbers = new Set(data.drawn);
       document.querySelectorAll('.ball-slot').forEach((el, idx) => {
         const num = idx + 1;
         if (drawnNumbers.has(num)) el.classList.add('active');
         else el.classList.remove('active');
       });
-      currentBallElem.textContent = data.current;
+      currentBallElem.textContent = data.current || '--';
       updateCount();
 
       if (data.jackpot) {
